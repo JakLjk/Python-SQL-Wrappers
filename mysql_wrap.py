@@ -28,6 +28,7 @@ class Database:
         except Error as err:
             raise Error(err)
 
+    # TODO add
     def insert_into_table(self, 
                           table_name, 
                           column_data:dict):
@@ -44,7 +45,7 @@ class Database:
         columns_parsed = ",".join(col_names_list)
         values_list = list(column_data.values())
         values_parsed = ",".join([f"\"{val}\"" for val in values_list])
-
+        
         if type(values_parsed) == tuple:
             self.cursor.execute(f"""
             INSERT INTO {table_name} ({columns_parsed}) 
