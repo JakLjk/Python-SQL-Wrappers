@@ -59,7 +59,7 @@ class Database:
                                     col_names:list,
                                     data:list):
         
-        """Experimental for adding multiple rows"""
+        """"""
         num_types = (int, float)
 
         columns_sql = ",".join(col_names)
@@ -262,3 +262,39 @@ class Database:
         statement = " AND ".join(
                 [f"{str(k)} = {str(k)} + '{str(v)}'" for k,v in dictionary.items()])
         return statement
+    
+    def get_col_max_val(self, table_name, col_name):
+        """Return max value of column"""
+        self.cursor.execute(f"SELECT MAX({col_name}) FROM {table_name}")
+        return self.cursor.fetchall()[0][0]
+    
+    def get_distinct_col(self, table, column_name):
+        """Returns all distinct values in specified column"""
+        query = self.cursor.execute(f"""
+        SELECT DISTINCT {column_name} FROM {table}
+        """)
+        return self.cursor.fetchall()
+
+    def get_distinct_not_in_table2(self, table1, table2, column_name, column_name_table_2=""):
+        """Gets all distinc values from column,
+        if such value is not in in another table column"""
+        if not column_name_table_2:
+            column_name_table_2 = column_name
+        query = self.cursor.execute(f"""
+        SELECT DISTINCT t1.{column_name} FROM {table1} AS t1
+        LEFT JOIN {table2} t2 ON t2.{column_name_table_2} = t1.{column_name} 
+        WHERE t2.{column_name_table_2} IS NULL
+        """)
+        return [value[0] for value in self.cursor.fetchall()]
+    
+    def count_rows(self, table_name, where=''):
+        """Returns number of rows in specified table,
+        accepts additional WHERE conditions"""
+        if where == '':
+            self.cursor.execute(f"SELECT * FROM {table_name}")
+            self.cursor.fetchall()
+            return self.cursor.rowcount
+        else:
+            self.cursor.execute(f"SELECT * FROM {table_name} WHERE {where}")
+            self.cursor.fetchall()
+            return self.cursor.rowcount
