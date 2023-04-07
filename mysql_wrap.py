@@ -298,3 +298,11 @@ class Database:
             self.cursor.execute(f"SELECT * FROM {table_name} WHERE {where}")
             self.cursor.fetchall()
             return self.cursor.rowcount
+        
+    def clear_table(self, table_name: str):
+        """! Use of commit method is required in order to apply changes in db"""
+        self.cursor.execute(f"DELETE FROM {table_name}")
+
+    def reset_table_id(self, table_name: str, auto_increment_starting_val=0):
+        """! Use of commit method is required in order to apply changes in db"""
+        self.cursor.execute(f"ALTER TABLE {table_name} AUTO_INCREMENT = {auto_increment_starting_val}")
