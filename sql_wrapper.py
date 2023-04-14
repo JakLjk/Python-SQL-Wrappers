@@ -1,51 +1,39 @@
-#!/usr/bin/env python3
+from _abstract_db_connector import DBConnector
 
-import mysql.connector
-from mysql.connector import Error
-import pandas as pd
-import time
+class SqlMethods():
+    def __init__(self, database_connector: DBConnector):
+        assert isinstance(database_connector, DBConnector), \
+            "Improper database cursor passed"
+        self.cursor = database_connector.get_cursor
 
-
-class Database:
-    """Class providing general sql handling methods,
-    based on mysql module, 
-    gives partial support for pandas dataframe"""
-    def __init__(self, host_name:str, user:str, user_passwd:str, db_name:str):
-        try:
-            self.connection = mysql.connector.connect(
-                host=host_name,
-                user=user,
-                passwd=user_passwd,
-                database=db_name)
-            self.cursor = self.connection.cursor()
-        except Error as err:
-            raise Error(f"There was a problem with initialising database: \n{err}")
-        
     def execute_query(self, query):
-        """General methond for  """
-        try:
-            self.cursor.execute(query)
-        except Error as err:
-            raise Error(err)
-
+        """General function, that is able to execute any query,
+        although it cannot return a value"""
+        self.cursor.execute(query)
 
     def insert_into_table(self, 
                           table_name, 
-                          column_data:dict or list[dict]):
+                          column_data:dict,
+                          check_forbidden_values=True):
         """!Requires separate use of commit method,
         in order to save changes to db.
 
         Column data takes unlimited amount of key:val pairs,
         where key corresponds to column in which we want to 
         append and val is the value which will be inserted
+
+        check_forbidden_values checks if data that is to be inserted into database,
+        has values that can corrupt query.
         """
 
         col_names_list = list(column_data.keys())
         col_names_list = [f"`{name}`" for name in col_names_list]
         columns_parsed = ",".join(col_names_list)
         values_list = list(column_data.values())
+        if check_forbidden_values:
+            values_list = self._remove_qoutes(values_list)
         values_parsed = ",".join([f"\"{val}\"" for val in values_list])
-        
+
         if type(values_parsed) == tuple:
             self.cursor.execute(f"""
             INSERT INTO {table_name} ({columns_parsed}) 
@@ -56,17 +44,29 @@ class Database:
             VALUES ({values_parsed})""")
 
     def insert_multiple_into_table(self, table_name,
-                                    col_names:list,
-                                    data:list):
+                                    col_names:str or list,
+                                    data:list,
+                                    check_forbidden_values=True):
         
-        """"""
+        """Allows for inserting multiple rows of data into database at once
+
+        col_names takes names of columns, in which corresponding data will be inserted.
+
+        check_forbidden_values checks if data that is to be inserted into database,
+        has values that can corrupt query.
+        """
         num_types = (int, float)
+
+        if isinstance(col_names, str):
+            col_names = [col_names]
 
         columns_sql = ",".join(col_names)
         columns_sql = f"({columns_sql})"
         values_sql_list = []
 
         for row in data:
+            if check_forbidden_values:
+                row = self._remove_qoutes(row)
             if type(row) == list:
                 row =  ",".join([val if type(val) in num_types else f"\"{val}\"" for val in row])
             if type(row) == str:
@@ -81,8 +81,7 @@ class Database:
         self.cursor.execute(f"""
             INSERT INTO {table_name} {columns_sql}
             VALUES {values_sql_list}""")
-        
-        
+              
     def fetch_from_table(self, 
                          table_name, what_columns='*', 
                          where={}):
@@ -104,31 +103,32 @@ class Database:
         values = self.cursor.fetchall()
         return values
     
-    def fetch_from_table_to_df(self, 
-                         table_name, what_columns='*', 
-                         where={},
-                         df_index_col=None):
-        """Product of this function is Pandas dataframe.
+    # TODO implement pandas support
+    # def fetch_from_table_to_df(self, 
+    #                      table_name, what_columns='*', 
+    #                      where={},
+    #                      df_index_col=None):
+    #     """Product of this function is Pandas dataframe.
         
-        Allows for receiving one, or multiple rows from specified
-        table_name. What_columns argument can be changed, in order to
-        return only specified columns.
+    #     Allows for receiving one, or multiple rows from specified
+    #     table_name. What_columns argument can be changed, in order to
+    #     return only specified columns.
 
-        Argument where allows for filtering values that are to be
-        returned. It takes dictionary with any amount of key:va pairs, 
-        in which key is the column containing argument, and val is the 
-        value we want to assert is true.
-        """
-        where_statement = self._dict_to_sql_statement(where)
-        dataframe = pd.read_sql(f"""
-        SELECT {what_columns} 
-        FROM {table_name} 
-        WHERE {where_statement}
-        """,
-        con=self.connection, 
-        index_col=df_index_col)
-        if dataframe.empty: return None
-        else: return dataframe
+    #     Argument where allows for filtering values that are to be
+    #     returned. It takes dictionary with any amount of key:va pairs, 
+    #     in which key is the column containing argument, and val is the 
+    #     value we want to assert is true.
+    #     """
+    #     where_statement = self._dict_to_sql_statement(where)
+    #     dataframe = pd.read_sql(f"""
+    #     SELECT {what_columns} 
+    #     FROM {table_name} 
+    #     WHERE {where_statement}
+    #     """,
+    #     con=self.connection, 
+    #     index_col=df_index_col)
+    #     if dataframe.empty: return None
+    #     else: return dataframe
 
     # TODO add lowercase or exact string check
     def check_if_value_exists(self, 
@@ -224,9 +224,9 @@ class Database:
         waiting for such command."""
         self.connection.commit()
 
-    def multiple_transactions(self, queries=[]):
+    def multiple_transactions(self, queries=[], autocommit=False):
         """used to manually pass multiple sql queries as list,
-        which are commited together.
+        which will be commited together.
 
         In case of failure, script uses rollback in order not to 
         pass incomplete information.
@@ -234,22 +234,77 @@ class Database:
         try:
             for query in queries:
                 self.cursor.execute(query)
-            self.connection.commit()
+            if autocommit:
+                self.connection.commit()
         except Exception as e:
             self.connection.rollback()
             raise Exception(f"Could not complete transaction: {e}")
+    
         
-    def get_sql_date(self, datetime=False):
-        "Returns current date or datetime in proper sql format"
-        if datetime:
-            return time.strftime(('%Y-%m-%d %H:%M:%S'))
+    def get_col_max_val(self, table_name, col_name):
+        """Returns max value from colum.
+        Can be used on strings - uses standard SQL evaluation of such data type"""
+        self.cursor.execute(f"SELECT MAX({col_name}) FROM {table_name}")
+        return self.cursor.fetchall()[0][0]
+    
+    def get_distinct_col(self, table, column_name):
+        """Returns distinct values from column"""
+        query = self.cursor.execute(f"""
+        SELECT DISTINCT {column_name} FROM {table}
+        """)
+        return self.cursor.fetchall()
+
+    def get_distinct_not_in_table2(self, table1, table2, column_name, column_name_table_2=""):
+        """Returns distrinct values from column,
+        But only if such values are not in table 2"""
+        if not column_name_table_2:
+            column_name_table_2 = column_name
+        query = self.cursor.execute(f"""
+        SELECT DISTINCT t1.{column_name} FROM {table1} AS t1
+        LEFT JOIN {table2} t2 ON t2.{column_name_table_2} = t1.{column_name} 
+        WHERE t2.{column_name_table_2} IS NULL
+        """)
+        return [value[0] for value in self.cursor.fetchall()]
+    
+    def count_rows(self, table_name, where=''):
+        """Returns number of rows in table."""
+        if where == '':
+            self.cursor.execute(f"SELECT * FROM {table_name}")
+            self.cursor.fetchall()
+            return self.cursor.rowcount
         else:
-            return time.strftime(('%Y-%m-%d'))
+            self.cursor.execute(f"SELECT * FROM {table_name} WHERE {where}")
+            self.cursor.fetchall()
+            return self.cursor.rowcount
         
-    def _dict_to_sql_statement(self, dictionary={}):
+    def clear_table(self, table_name: str, reset_table_id=True):
+        """! Use of commit method is required in order to apply changes in db
+        
+        Clears table, such action is irreversible"""
+        self.cursor.execute(f"DELETE FROM {table_name}")
+        if reset_table_id:
+            self.reset_table_id(table_name)
+
+    def reset_table_id(self, table_name: str, auto_increment_starting_val=0):
+        """! Use of commit method is required in order to apply changes in db
+        
+        Resets auto incrementation column in table"""
+        self.cursor.execute(f"ALTER TABLE {table_name} AUTO_INCREMENT = {auto_increment_starting_val}")
+
+
+    def _dict_to_sql_statement(self, dictionary={}, empty_as_where=True):
         """Used mainly with passed where statement in dict form.
-        Changes passed dict into proprer sql format."""
-        if dictionary == {}: statement = '1 = 1'
+        Changes passed dict into proprer sql format.
+        
+        If empty dictionary is passed and empty_as_where argument = True,
+        it is assumed that  dictionary is to be used in SQL WHERE statement,
+        in which it is supposed to return all values [1=1]
+        """
+        if dictionary == {}:
+            if empty_as_where:
+                statement = '1 = 1'
+            else:
+                raise ValueError("Empty dictionary is not accepted")
         else:
             statement = " AND ".join(
                 [f"{(k)} = '{str(v)}'" for k,v in dictionary.items()])
@@ -262,47 +317,8 @@ class Database:
         statement = " AND ".join(
                 [f"{str(k)} = {str(k)} + '{str(v)}'" for k,v in dictionary.items()])
         return statement
-    
-    def get_col_max_val(self, table_name, col_name):
-        """Return max value of column"""
-        self.cursor.execute(f"SELECT MAX({col_name}) FROM {table_name}")
-        return self.cursor.fetchall()[0][0]
-    
-    def get_distinct_col(self, table, column_name):
-        """Returns all distinct values in specified column"""
-        query = self.cursor.execute(f"""
-        SELECT DISTINCT {column_name} FROM {table}
-        """)
-        return self.cursor.fetchall()
 
-    def get_distinct_not_in_table2(self, table1, table2, column_name, column_name_table_2=""):
-        """Gets all distinc values from column,
-        if such value is not in in another table column"""
-        if not column_name_table_2:
-            column_name_table_2 = column_name
-        query = self.cursor.execute(f"""
-        SELECT DISTINCT t1.{column_name} FROM {table1} AS t1
-        LEFT JOIN {table2} t2 ON t2.{column_name_table_2} = t1.{column_name} 
-        WHERE t2.{column_name_table_2} IS NULL
-        """)
-        return [value[0] for value in self.cursor.fetchall()]
-    
-    def count_rows(self, table_name, where=''):
-        """Returns number of rows in specified table,
-        accepts additional WHERE conditions"""
-        if where == '':
-            self.cursor.execute(f"SELECT * FROM {table_name}")
-            self.cursor.fetchall()
-            return self.cursor.rowcount
-        else:
-            self.cursor.execute(f"SELECT * FROM {table_name} WHERE {where}")
-            self.cursor.fetchall()
-            return self.cursor.rowcount
-        
-    def clear_table(self, table_name: str):
-        """! Use of commit method is required in order to apply changes in db"""
-        self.cursor.execute(f"DELETE FROM {table_name}")
-
-    def reset_table_id(self, table_name: str, auto_increment_starting_val=0):
-        """! Use of commit method is required in order to apply changes in db"""
-        self.cursor.execute(f"ALTER TABLE {table_name} AUTO_INCREMENT = {auto_increment_starting_val}")
+    def _remove_qoutes(self, parse_values: list or str):
+        if isinstance(parse_values, str):
+            parse_values = [parse_values]
+        return [s.replace('"', "\'\'") if isinstance(s, str) else s for s in parse_values]
