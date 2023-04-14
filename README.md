@@ -22,4 +22,4 @@ Currently supports MariaDB and MySQL
   
   
  # Todo
-  - Implement Pandas module, that would allow for inserting / fetching whole pandas tables in/from database.
+  - Implement Pandas module, which would allow for inserting / fetching whole pandas tables in/from database.
